@@ -1,0 +1,12 @@
+spring :
+  application :
+    name : quickchat-backend
+
+  datasource :
+    url : jdbc:mysql://database-2.clwoya2662ja.ap-northeast-2.rds.amazonaws.com:3306/quickchat
+    username : admin
+    password : ${password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa :
+    show-sql: true
