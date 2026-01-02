@@ -39,7 +39,7 @@ public class GoogleAuthService {
     public GoogleUserInfoResponse getUserInfo(String token) {
         return RestClient.create().get()
                 .uri("https://openidconnect.googleapis.com/v1/userinfo")
-                .header("Authorization", "Bearer" + token)
+                .header("Authorization", "Bearer " + token)
                 .retrieve()
                 .body(GoogleUserInfoResponse.class);
     }

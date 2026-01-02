@@ -25,7 +25,7 @@ public class JWTVerifyFilter extends OncePerRequestFilter {
     @Override
     protected boolean shouldNotFilter(HttpServletRequest req) throws ServletException {
         String uri = req.getRequestURI();
-        return req.getMethod().equals("OPTIONS") || uri.startsWith("/api/auth") || uri.startsWith("/api/friends");
+        return !uri.startsWith("/api/chat");
     }
 
     @Override

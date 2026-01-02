@@ -1,6 +1,9 @@
 package org.example.quickchat.controller;
 
 import com.auth0.jwt.JWT;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.quickchat.domain.entity.Chat;
@@ -10,22 +13,29 @@ import org.example.quickchat.domain.entity.Member;
 import org.example.quickchat.dto.projection.ChatAndLastMsg;
 import org.example.quickchat.dto.request.NewChatRequest;
 import org.example.quickchat.dto.request.NewMessageRequest;
+import org.example.quickchat.dto.response.chat.ChatDetailInfoResponse;
 import org.example.quickchat.dto.response.chat.ChatResponse;
 import org.example.quickchat.dto.response.chat.GetChatMessageResponse;
 import org.example.quickchat.repository.ChatMessageRepository;
 import org.example.quickchat.repository.ChatRepository;
 import org.example.quickchat.repository.ChatSessionRepository;
 import org.example.quickchat.repository.MemberRepository;
+import org.springframework.http.HttpRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+@SecurityRequirement(name="bearerAuth")
+@Tag(name="채팅 API", description = "채팅방 및 메시지 관련 API")
 @CrossOrigin
 @RestController
 @RequiredArgsConstructor
@@ -35,8 +45,10 @@ public class ChatController {
     final ChatSessionRepository chatSessionRepository;
     final ChatMessageRepository chatMessageRepository;
     final MemberRepository memberRepository;
+    final SimpMessagingTemplate template;
 
     // 채팅방 개설 or 이미 존재하는 채팅방 id 넘겨주기
+    @Operation(summary = "채팅방 개설", description = "대화 상대방의 ID로 채팅방 조회 및 생성")
     @PostMapping
     public ResponseEntity<?> createChat(@RequestBody NewChatRequest ncr,
                                         @RequestAttribute Long tokenId) {
@@ -98,6 +110,15 @@ public class ChatController {
                 .map(m -> m.getChat())
                 .distinct()
                 .map(dm -> {
+                    if (dm.getTitle() == null) {
+                        String subTitle =
+                                dm.getChatSessions().stream()
+                                        .filter(f -> !f.getMember().equals(source))
+                                        .map(f -> f.getMember().getName())
+                                        .collect(Collectors.joining(", "));
+
+                        dm.setTitle(subTitle);
+                    }
                     List<ChatMessage> allMsg = chatMessageRepository.findAll().stream()
                             .filter(f -> f.getChat().equals(dm))
                             .sorted((o1, o2) -> {
@@ -105,39 +126,39 @@ public class ChatController {
                             }).toList();
                     ChatMessage lastChat = allMsg.isEmpty() ? null : allMsg.getFirst();
 
-                    ChatSession cs = dm.getChatSessions().stream().filter(f-> f.getMember().equals(source)).findFirst().get();
-                    int unReadCount = (int)allMsg.stream().filter(f->f.getTalkedAt().isAfter(cs.getLastActiveAt())).count();
+                    ChatSession cs = dm.getChatSessions().stream().filter(f -> f.getMember().equals(source)).findFirst().get();
+                    int unReadCount = (int) allMsg.stream().filter(f -> f.getTalkedAt().isAfter(cs.getLastActiveAt())).count();
 
                     ChatAndLastMsg cal = new ChatAndLastMsg(dm, lastChat, unReadCount);
                     return cal;
-                }).toList();
+                }).filter(f -> f.getLastMsg() != null).toList();
 
-        return ResponseEntity.ok().body(myChat);
+        return ResponseEntity.ok().body(new ChatDetailInfoResponse(myChat));
     }
 
     // 해당 채팅방에 모든 메시지 가져오기
     @GetMapping("/{chatId}/messages")
     public ResponseEntity<?> getChat(@PathVariable String chatId,
                                      @RequestAttribute Long tokenId) {
-        Member source = memberRepository.findById(tokenId).orElseGet(()->null);
+        Member source = memberRepository.findById(tokenId).orElseGet(() -> null);
         List<ChatMessage> list = chatMessageRepository.findAll();
         Chat chat = chatRepository.findById(chatId).orElseGet(() -> null);
 
-        if(source == null || list.isEmpty() || chat == null) {
+        if (source == null || list.isEmpty() || chat == null) {
             return ResponseEntity.notFound().build();
         }
 
         ChatSession chatSession = chat.getChatSessions().stream()
-                .filter(f->f.getMember().equals(source))
-                .findFirst().orElseGet(()->null);
+                .filter(f -> f.getMember().equals(source))
+                .findFirst().orElseGet(() -> null);
 
-        if(chatSession == null) {
-            return ResponseEntity.badRequest().build();
+        if (chatSession == null) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
         List<ChatMessage> messageList = list.stream()
-                .filter(f->f.getChat().equals(chat) && f.getTalkedAt().isAfter(chatSession.getJoinAt()))
-                .sorted((o1,o2)->{
+                .filter(f -> f.getChat().equals(chat) && f.getTalkedAt().isAfter(chatSession.getJoinAt()))
+                .sorted((o1, o2) -> {
                     return o1.getTalkedAt().compareTo(o2.getTalkedAt());
                 }).toList();
 
@@ -155,14 +176,15 @@ public class ChatController {
                                         @RequestAttribute Long tokenId,
                                         @RequestBody @Valid NewMessageRequest nmr,
                                         BindingResult bindingResult) {
-        Member source = memberRepository.findById(tokenId).orElseGet(()->null);
-        Chat chat = chatRepository.findById(chatId).orElseGet(()->null);
+        Member source = memberRepository.findById(tokenId).orElseGet(() -> null);
+        Chat chat = chatRepository.findById(chatId).orElseGet(() -> null);
         ChatSession chatSession = chatSessionRepository.findAll().stream()
-                .filter(f->f.getChat().equals(chat) && f.getMember().equals(source))
+                .filter(f -> f.getChat().equals(chat) && f.getMember().equals(source))
                 .findFirst().orElseGet(() -> null);
-        if (source == null || chat == null || chatSession == null || !chat.getChatSessions().contains(chatSession)) {
+
+        if (source == null || chat == null || chatSession == null) {
             return ResponseEntity.badRequest().build();
-        }else if(bindingResult.hasErrors()) {
+        } else if (bindingResult.hasErrors()) {
             return ResponseEntity.badRequest().body(bindingResult.getAllErrors());
         }
 
@@ -171,6 +193,15 @@ public class ChatController {
 
         chatSession.setLastActiveAt(LocalDateTime.now());
         chatSessionRepository.save(chatSession);
+
+        Map map = Map.of("type", "NEW_MESSAGE");
+        template.convertAndSend("/quickchat/chat/" + chatId, map);
+
+        chatSessionRepository.findAll().stream()
+                .filter(f -> f.getChat().equals(chat) && !f.getMember().equals(source))
+                .forEach(cs -> {
+                    template.convertAndSend("/quickchat/member/" + cs.getMember().getId(), "NEW_MESSAGE");
+                });
 
         return ResponseEntity.status(HttpStatus.CREATED).body(chatMessage);
     }
@@ -181,6 +212,27 @@ public class ChatController {
     public ResponseEntity<?> getChats(@PathVariable String chatId) {
         Chat chat = chatRepository.findById(chatId).orElseGet(null);
         return ResponseEntity.ok().body(chat);
+    }
+
+    @GetMapping("/writing/{chatId}")
+    public ResponseEntity<?> checkWriting(@PathVariable String chatId,
+                                          @RequestAttribute Long tokenId) {
+        Member source = memberRepository.findById(tokenId).orElseGet(() -> null);
+        Chat chat = chatRepository.findById(chatId).orElseGet(() -> null);
+
+        if (source == null || chat == null) {
+            return ResponseEntity.badRequest().build();
+        }
+
+//        Map map = Map.of("type", "WRITING_MESSAGE", "writer", source);
+//
+//        chat.getChatSessions().stream()
+//                .filter(f -> !f.getMember().equals(source))
+//                .forEach(cs -> {
+//                    template.convertAndSend("/quickchat/chat/" + chatId, map);
+//                }); // 실시간 작성중이라는 정보 전달 기능 미완성
+
+        return ResponseEntity.ok().build();
     }
 
 

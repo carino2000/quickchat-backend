@@ -1,5 +1,6 @@
 package org.example.quickchat.controller;
 
+import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.example.quickchat.domain.entity.FriendLink;
@@ -28,7 +29,7 @@ public class FriendController {
 
     // 친구 검색(이름 or 이메일)
     @GetMapping
-    public ResponseEntity<?> friendSearch(@RequestParam String keyword,
+    public ResponseEntity<?> friendSearch(@RequestParam @Parameter(description = "검색 키워드", example = "배지훈") String keyword,
                                           @RequestParam Long memberId) {
         List<Member> members = memberRepository.findAll();
         MemberListResponse resp = new MemberListResponse(members.stream().filter(m -> {
@@ -40,7 +41,7 @@ public class FriendController {
 
     // 친구 추가
     @PostMapping("/{memberId}")
-    public ResponseEntity<?> addFriend(@PathVariable Long memberId,
+    public ResponseEntity<?> addFriend(@PathVariable @Parameter(description = "요청자 아이디", example = "1234") Long memberId,
                                        @RequestBody @Valid NewFriendRequest nfr,
                                        BindingResult bindingResult) {
         if (bindingResult.hasErrors()) {
